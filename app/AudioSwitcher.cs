@@ -13,6 +13,13 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
+[assembly: System.Reflection.AssemblyTitle("Audio Switcher")]
+[assembly: System.Reflection.AssemblyProduct("Audio Switcher")]
+[assembly: System.Reflection.AssemblyDescription("Switches default audio devices by priority")]
+[assembly: System.Reflection.AssemblyCopyright("elminm")]
+[assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.0.0")]
+
 namespace AudioSwitcher
 {
     static class Program
@@ -24,15 +31,18 @@ namespace AudioSwitcher
         {
             if (args.Length == 2 && args[0] == "--make-icon") { IconMaker.WriteIco(args[1]); return 0; }
 
+            bool exitOnly = args.Contains("--exit"); // used by the installer/uninstaller
             bool created;
-            using (var mutex = new Mutex(true, "Local\\AudioSwitcher.Single", out created))
+            using (var mutex = new Mutex(!exitOnly, "Local\\AudioSwitcher.Single", out created))
             {
                 var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\AudioSwitcher.Show");
+                var exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\AudioSwitcher.Exit");
+                if (exitOnly) { if (!created) exitEvent.Set(); return 0; }
                 if (!created) { showEvent.Set(); return 0; }   // already running: bring its window up
                 try { SetProcessDPIAware(); } catch { }
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                var form = new MainForm(showEvent);
+                var form = new MainForm(showEvent, exitEvent);
                 if (!args.Contains("--tray")) form.Show();
                 Application.Run();
                 GC.KeepAlive(mutex);
@@ -113,7 +123,8 @@ namespace AudioSwitcher
         const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         static readonly Color ActiveColor = Color.FromArgb(0, 128, 64);
 
-        readonly string dir = AppDomain.CurrentDomain.BaseDirectory;
+        readonly string exeDir = AppDomain.CurrentDomain.BaseDirectory;
+        readonly string dir; // where config.json and the log live
         readonly string cfgPath, logPath;
         Config cfg;
         string lastSavedJson;
@@ -144,14 +155,22 @@ namespace AudioSwitcher
 
         int S(int v) { return (int)Math.Round(v * scale); }
 
-        public MainForm(EventWaitHandle showEvent)
+        public MainForm(EventWaitHandle showEvent, EventWaitHandle exitEvent)
         {
+            // Portable mode (config.json next to the exe, e.g. a dev build) keeps data beside the exe;
+            // an installed copy keeps it in %APPDATA%\AudioSwitcher so upgrades never touch it.
+            if (File.Exists(Path.Combine(exeDir, "config.json"))) dir = exeDir;
+            else
+            {
+                dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AudioSwitcher");
+                Directory.CreateDirectory(dir);
+            }
             cfgPath = Path.Combine(dir, "config.json");
             logPath = Path.Combine(dir, "audio-switcher.log");
             try { if (File.Exists(logPath) && new FileInfo(logPath).Length > 1024 * 1024) File.Delete(logPath); } catch { }
             using (var g = Graphics.FromHwnd(IntPtr.Zero)) scale = g.DpiX / 96f;
 
-            string example = Path.Combine(dir, "config.example.json");
+            string example = Path.Combine(exeDir, "config.example.json");
             try { if (!File.Exists(cfgPath) && File.Exists(example)) File.Copy(example, cfgPath); } catch { }
             string err;
             cfg = Config.Load(cfgPath, out err);
@@ -189,8 +208,9 @@ namespace AudioSwitcher
             {
                 while (true)
                 {
-                    showEvent.WaitOne();
-                    try { BeginInvoke(new Action(ShowWindowFront)); } catch { }
+                    int which = WaitHandle.WaitAny(new WaitHandle[] { showEvent, exitEvent });
+                    try { BeginInvoke(which == 0 ? new Action(ShowWindowFront) : new Action(ExitApp)); } catch { }
+                    if (which == 1) return;
                 }
             });
             t.IsBackground = true;

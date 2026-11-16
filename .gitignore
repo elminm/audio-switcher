@@ -8,3 +8,6 @@ config.json
 
 # legacy PowerShell prototype
 audio-switcher.ps1
+
+# installer output
+dist/

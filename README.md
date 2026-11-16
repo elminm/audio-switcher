@@ -14,6 +14,16 @@ When a device is connected or disconnected, the app picks the highest-priority d
 - Starts with Windows (optional) and runs from the tray.
 - Single small `.exe` with no dependencies beyond .NET Framework 4.x, which ships with Windows.
 
+## Install
+
+Run `AudioSwitcher-Setup-<version>.exe`. It installs for the current user only, so no admin rights are needed. The installer:
+
+- installs to `%LOCALAPPDATA%\Programs\Audio Switcher`
+- adds a Start Menu shortcut, and optionally a desktop icon and "Start with Windows"
+- appears in **Settings → Apps**, where it can be uninstalled
+
+Settings and the log are stored in `%APPDATA%\AudioSwitcher`, so upgrades keep them. When you uninstall, the uninstaller asks whether to delete them.
+
 ## Build
 
 No SDK needed. The C# compiler that ships with Windows is enough:
@@ -22,7 +32,17 @@ No SDK needed. The C# compiler that ships with Windows is enough:
 powershell -ExecutionPolicy Bypass -File app\build.ps1
 ```
 
-This produces `AudioSwitcher.exe` in the repository root. Run it once. It creates `config.json` from `config.example.json` on first start.
+This produces `AudioSwitcher.exe` in the repository root.
+
+To build the installer, install [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`) and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\build.ps1
+```
+
+The installer is written to `dist\`.
+
+If a `config.json` sits next to the exe, the app runs in portable mode and keeps its settings there. Otherwise it uses `%APPDATA%\AudioSwitcher`. On first start it creates `config.json` from `config.example.json`.
 
 ## Configuration
 
