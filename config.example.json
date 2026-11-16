@@ -1,4 +1,5 @@
 {
+  "language": "en",
   "pollSeconds": 3,
   "autoSwitch": true,
   "output": [

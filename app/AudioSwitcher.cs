@@ -45,6 +45,7 @@ namespace AudioSwitcher
     {
         public int PollSeconds = 3;
         public bool AutoSwitch = true;
+        public string Language = "en";
         public List<string> Output = new List<string>();
         public List<string> Input = new List<string>();
 
@@ -60,6 +61,7 @@ namespace AudioSwitcher
                 object v;
                 if (d.TryGetValue("pollSeconds", out v)) c.PollSeconds = Math.Max(1, Convert.ToInt32(v));
                 if (d.TryGetValue("autoSwitch", out v)) c.AutoSwitch = Convert.ToBoolean(v);
+                if (d.TryGetValue("language", out v) && v != null) c.Language = v.ToString();
                 if (d.TryGetValue("output", out v)) c.Output = ToList(v);
                 if (d.TryGetValue("input", out v)) c.Input = ToList(v);
                 return c;
@@ -79,7 +81,8 @@ namespace AudioSwitcher
         {
             var js = new JavaScriptSerializer();
             var sb = new StringBuilder();
-            sb.Append("{\r\n  \"pollSeconds\": ").Append(PollSeconds).Append(",\r\n");
+            sb.Append("{\r\n  \"language\": ").Append(js.Serialize(Language)).Append(",\r\n");
+            sb.Append("  \"pollSeconds\": ").Append(PollSeconds).Append(",\r\n");
             sb.Append("  \"autoSwitch\": ").Append(AutoSwitch ? "true" : "false").Append(",\r\n");
             AppendList(sb, js, "output", Output); sb.Append(",\r\n");
             AppendList(sb, js, "input", Input); sb.Append("\r\n}\r\n");
@@ -121,7 +124,9 @@ namespace AudioSwitcher
         FileSystemWatcher watcher;
         ListView lvOut, lvIn, lvBt;
         CheckBox chkAuto, chkStartup;
+        ComboBox cmbLang;
         Label lblHx, lblNow;
+        readonly List<KeyValuePair<object, string>> localized = new List<KeyValuePair<object, string>>();
         ListBox lbLog;
         System.Windows.Forms.Timer tick;
         System.Threading.Timer hxTimer;
@@ -152,12 +157,13 @@ namespace AudioSwitcher
             cfg = Config.Load(cfgPath, out err);
             if (cfg == null) cfg = new Config();
             else if (!File.Exists(cfgPath)) SaveConfig();
+            L.Lang = cfg.Language;
 
             appIcon = IconMaker.MakeIcon(SystemInformation.SmallIconSize.Width);
             BuildUi();
             BuildTray();
-            if (err != null) Log("config.json oxunmadı: " + err);
-            Log("Başladı");
+            if (err != null) Log(L.T("logCfgReadErr", err));
+            Log(L.T("logStarted"));
 
             audio = new CoreAudio();
             notif = new NotificationClient();
@@ -215,18 +221,29 @@ namespace AudioSwitcher
             // top bar
             var top = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, RowCount = 2, Margin = new Padding(0, 0, 0, S(6)) };
             var flags = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true, Margin = new Padding(0) };
-            chkAuto = new CheckBox { Text = "Avtomatik keçid (prioritetə görə)", AutoSize = true, Checked = cfg.AutoSwitch, Margin = new Padding(0, S(2), S(20), S(2)) };
+            chkAuto = Loc(new CheckBox { AutoSize = true, Checked = cfg.AutoSwitch, Margin = new Padding(0, S(2), S(20), S(2)) }, "autoSwitch");
             chkAuto.CheckedChanged += (s, e) =>
             {
                 if (suppressEvents) return;
                 cfg.AutoSwitch = chkAuto.Checked; SaveConfig();
-                Log(cfg.AutoSwitch ? "Avtomatik keçid açıldı" : "Avtomatik keçid söndürüldü");
+                Log(L.T(cfg.AutoSwitch ? "logAutoOn" : "logAutoOff"));
                 if (cfg.AutoSwitch) Evaluate(true);
             };
-            chkStartup = new CheckBox { Text = "Windows ilə başlasın", AutoSize = true, Checked = GetStartup(), Margin = new Padding(0, S(2), S(20), S(2)) };
+            chkStartup = Loc(new CheckBox { AutoSize = true, Checked = GetStartup(), Margin = new Padding(0, S(2), S(20), S(2)) }, "startWithWindows");
             chkStartup.CheckedChanged += (s, e) => { SetStartup(chkStartup.Checked); };
+            var lblLang = Loc(new Label { AutoSize = true, Margin = new Padding(0, S(5), S(4), S(2)) }, "language");
+            cmbLang = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = S(120), Margin = new Padding(0, 0, S(20), 0) };
+            cmbLang.Items.AddRange(L.Names);
+            cmbLang.SelectedIndex = L.Index;
+            cmbLang.SelectedIndexChanged += (s, e) =>
+            {
+                if (suppressEvents || cmbLang.SelectedIndex < 0) return;
+                L.Lang = L.Codes[cmbLang.SelectedIndex];
+                cfg.Language = L.Lang; SaveConfig();
+                ApplyTexts();
+            };
             lblHx = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(0, S(5), 0, S(2)) };
-            flags.Controls.Add(chkAuto); flags.Controls.Add(chkStartup); flags.Controls.Add(lblHx);
+            flags.Controls.Add(chkAuto); flags.Controls.Add(chkStartup); flags.Controls.Add(lblLang); flags.Controls.Add(cmbLang); flags.Controls.Add(lblHx);
             lblNow = new Label { AutoSize = true, Font = boldFont, Margin = new Padding(S(2), S(6), 0, 0) };
             top.Controls.Add(flags, 0, 0);
             top.Controls.Add(lblNow, 0, 1);
@@ -236,48 +253,70 @@ namespace AudioSwitcher
             var pri = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0) };
             pri.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             pri.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            pri.Controls.Add(PriorityGroup("Output prioriteti (səs çıxışı)", EDataFlow.Render, out lvOut), 0, 0);
-            pri.Controls.Add(PriorityGroup("Input prioriteti (mikrofon)", EDataFlow.Capture, out lvIn), 1, 0);
+            pri.Controls.Add(PriorityGroup("outputGroup", EDataFlow.Render, out lvOut), 0, 0);
+            pri.Controls.Add(PriorityGroup("inputGroup", EDataFlow.Capture, out lvIn), 1, 0);
             root.Controls.Add(pri, 0, 1);
 
             // bluetooth
-            var bt = new GroupBox { Text = "Bluetooth audio cihazları", Dock = DockStyle.Fill, Padding = new Padding(S(8)) };
+            var bt = Loc(new GroupBox { Dock = DockStyle.Fill, Padding = new Padding(S(8)) }, "btGroup");
             var btT = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
             btT.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             btT.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            lvBt = NewListView(new[] { "Cihaz", "Status", "Növ" }, new[] { 0, 120, 130 });
+            lvBt = NewListView(new[] { "colDevice", "colStatus", "colType" }, new[] { 0, 120, 130 });
             lvBt.DoubleClick += (s, e) => { var g = SelectedBt(); if (g != null) BtAction(!g.Connected); };
             btT.Controls.Add(lvBt, 0, 0);
             var btB = ButtonColumn();
-            btB.Controls.Add(Btn("Qoş", (s, e) => BtAction(true)));
-            btB.Controls.Add(Btn("Ayır", (s, e) => BtAction(false)));
-            btB.Controls.Add(Btn("Yenilə", (s, e) => { dirty = true; }));
+            btB.Controls.Add(Btn("btnConnect", (s, e) => BtAction(true)));
+            btB.Controls.Add(Btn("btnDisconnect", (s, e) => BtAction(false)));
+            btB.Controls.Add(Btn("btnRefresh", (s, e) => { dirty = true; }));
             btT.Controls.Add(btB, 1, 0);
             bt.Controls.Add(btT);
             root.Controls.Add(bt, 0, 2);
 
             // log
-            var lg = new GroupBox { Text = "Jurnal", Dock = DockStyle.Fill, Padding = new Padding(S(8)) };
+            var lg = Loc(new GroupBox { Dock = DockStyle.Fill, Padding = new Padding(S(8)) }, "logGroup");
             lbLog = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
             lg.Controls.Add(lbLog);
             root.Controls.Add(lg, 0, 3);
         }
 
-        Control PriorityGroup(string title, EDataFlow flow, out ListView lvOutParam)
+        // Registers a control/column so its text follows the selected language.
+        T Loc<T>(T target, string key) where T : class
         {
-            var gb = new GroupBox { Text = title, Dock = DockStyle.Fill, Padding = new Padding(S(8)) };
+            localized.Add(new KeyValuePair<object, string>(target, key));
+            SetText(target, L.T(key));
+            return target;
+        }
+
+        static void SetText(object o, string s)
+        {
+            var c = o as Control;
+            if (c != null) { c.Text = s; return; }
+            var h = o as ColumnHeader;
+            if (h != null) h.Text = s;
+        }
+
+        void ApplyTexts()
+        {
+            foreach (var kv in localized) SetText(kv.Key, L.T(kv.Value));
+            if (audio != null) RefreshUi();
+        }
+
+        Control PriorityGroup(string titleKey, EDataFlow flow, out ListView lvOutParam)
+        {
+            var gb = Loc(new GroupBox { Dock = DockStyle.Fill, Padding = new Padding(S(8)) }, titleKey);
             var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             t.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            var lv = NewListView(new[] { "#", "Cihaz", "Status" }, new[] { 26, 0, 110 });
+            var lv = NewListView(new[] { "#", "colDevice", "colStatus" }, new[] { 26, 0, 110 });
             lv.DoubleClick += (s, e) => UseNow(lv, flow);
             t.Controls.Add(lv, 0, 0);
             var b = ButtonColumn();
-            b.Controls.Add(Btn("▲  Yuxarı", (s, e) => MoveItem(lv, flow, -1)));
-            b.Controls.Add(Btn("▼  Aşağı", (s, e) => MoveItem(lv, flow, +1)));
-            b.Controls.Add(Btn("+  Əlavə et", (s, e) => ShowAddMenu((Control)s, lv, flow)));
-            b.Controls.Add(Btn("✕  Sil", (s, e) => RemoveItem(lv, flow)));
-            b.Controls.Add(Btn("İndi seç", (s, e) => UseNow(lv, flow)));
+            b.Controls.Add(Btn("btnUp", (s, e) => MoveItem(lv, flow, -1)));
+            b.Controls.Add(Btn("btnDown", (s, e) => MoveItem(lv, flow, +1)));
+            b.Controls.Add(Btn("btnAdd", (s, e) => ShowAddMenu((Control)s, lv, flow)));
+            b.Controls.Add(Btn("btnRemove", (s, e) => RemoveItem(lv, flow)));
+            b.Controls.Add(Btn("btnUseNow", (s, e) => UseNow(lv, flow)));
             t.Controls.Add(b, 1, 0);
             gb.Controls.Add(t);
             lvOutParam = lv;
@@ -289,9 +328,11 @@ namespace AudioSwitcher
             return new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Dock = DockStyle.Fill, Margin = new Padding(S(6), 0, 0, 0) };
         }
 
-        Button Btn(string text, EventHandler click)
+        Button Btn(string key, EventHandler click)
         {
-            var b = new Button { Text = text, Width = S(112), Height = S(30), Margin = new Padding(0, 0, 0, S(6)), TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(S(6), 0, 0, 0) };
+            var b = Loc(new Button(), key);
+            b.Width = S(118); b.Height = S(30);
+            b.Margin = new Padding(0, 0, 0, S(6)); b.TextAlign = ContentAlignment.MiddleLeft; b.Padding = new Padding(S(6), 0, 0, 0);
             b.Click += click;
             return b;
         }
@@ -299,7 +340,11 @@ namespace AudioSwitcher
         ListView NewListView(string[] cols, int[] widths)
         {
             var lv = new DBListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, HideSelection = false, MultiSelect = false, HeaderStyle = ColumnHeaderStyle.Nonclickable };
-            for (int i = 0; i < cols.Length; i++) lv.Columns.Add(cols[i], S(widths[i] == 0 ? 150 : widths[i]));
+            for (int i = 0; i < cols.Length; i++)
+            {
+                var h = lv.Columns.Add(cols[i], S(widths[i] == 0 ? 150 : widths[i]));
+                if (cols[i] != "#") Loc(h, cols[i]);
+            }
             lv.Tag = Array.IndexOf(widths, 0);
             lv.Resize += (s, e) => FitColumns(lv);
             lv.HandleCreated += (s, e) => FitColumns(lv);
@@ -327,18 +372,25 @@ namespace AudioSwitcher
         void BuildTrayMenu(ContextMenuStrip m)
         {
             m.Items.Clear();
-            var open = new ToolStripMenuItem("Aç", null, (s, e) => ShowWindowFront());
+            var open = new ToolStripMenuItem(L.T("trayOpen"), null, (s, e) => ShowWindowFront());
             open.Font = new Font(m.Font, FontStyle.Bold);
             m.Items.Add(open);
             m.Items.Add(new ToolStripSeparator());
-            m.Items.Add(DeviceSubmenu("Output", EDataFlow.Render));
-            m.Items.Add(DeviceSubmenu("Input", EDataFlow.Capture));
+            m.Items.Add(DeviceSubmenu(L.T("output"), EDataFlow.Render));
+            m.Items.Add(DeviceSubmenu(L.T("input"), EDataFlow.Capture));
             m.Items.Add(new ToolStripSeparator());
-            var auto = new ToolStripMenuItem("Avtomatik keçid") { Checked = cfg.AutoSwitch };
+            var auto = new ToolStripMenuItem(L.T("autoSwitchShort")) { Checked = cfg.AutoSwitch };
             auto.Click += (s, e) => { chkAuto.Checked = !chkAuto.Checked; };
             m.Items.Add(auto);
+            var lang = new ToolStripMenuItem(L.T("language").TrimEnd(':'));
+            for (int i = 0; i < L.Names.Length; i++)
+            {
+                int li = i;
+                lang.DropDownItems.Add(new ToolStripMenuItem(L.Names[i], null, (s, e) => { cmbLang.SelectedIndex = li; }) { Checked = li == L.Index });
+            }
+            m.Items.Add(lang);
             m.Items.Add(new ToolStripSeparator());
-            m.Items.Add(new ToolStripMenuItem("Çıxış", null, (s, e) => ExitApp()));
+            m.Items.Add(new ToolStripMenuItem(L.T("trayExit"), null, (s, e) => ExitApp()));
         }
 
         ToolStripMenuItem DeviceSubmenu(string title, EDataFlow flow)
@@ -349,10 +401,10 @@ namespace AudioSwitcher
             {
                 var ep = e;
                 var it = new ToolStripMenuItem(ep.Name) { Checked = ep.Id == def };
-                it.Click += (s, a) => { audio.SetDefault(ep.Id); Log("Əl ilə: " + ep.Name); dirty = true; };
+                it.Click += (s, a) => { audio.SetDefault(ep.Id); Log(L.T("logManual", ep.Name)); dirty = true; };
                 sub.DropDownItems.Add(it);
             }
-            if (sub.DropDownItems.Count == 0) sub.DropDownItems.Add(new ToolStripMenuItem("(cihaz yoxdur)") { Enabled = false });
+            if (sub.DropDownItems.Count == 0) sub.DropDownItems.Add(new ToolStripMenuItem(L.T("trayNoDevices")) { Enabled = false });
             return sub;
         }
 
@@ -402,7 +454,7 @@ namespace AudioSwitcher
             int hx = hxState;
             if (hx != lastHx)
             {
-                if (lastHx != -2 || hx != -1) Log("HyperX qulaqlıq: " + HxText(hx));
+                if (lastHx != -2 || hx != -1) Log(L.T("hxLabel", HxText(hx)));
                 lastHx = hx;
                 dirty = true;
             }
@@ -410,7 +462,7 @@ namespace AudioSwitcher
             if (dirty) { dirty = false; Evaluate(false); }
         }
 
-        static string HxText(int hx) { return hx == 1 ? "açıq" : hx == 0 ? "sönülü" : "dongle tapılmadı"; }
+        static string HxText(int hx) { return L.T(hx == 1 ? "hxOn" : hx == 0 ? "hxOff" : "hxNone"); }
 
         static bool Matches(AudioEndpoint e, string pattern)
         {
@@ -436,16 +488,16 @@ namespace AudioSwitcher
                 available = current.Where(x => x.Active && !HiddenByHeadset(x)).ToList();
                 string sig = string.Join("|", available.Select(x => x.Id).OrderBy(x => x));
                 bool changed = sig != lastSig;
-                if (changed && lastSig != null) Log("Cihaz siyahısı dəyişdi");
+                if (changed && lastSig != null) Log(L.T("logDevicesChanged"));
                 lastSig = sig;
                 if (cfg.AutoSwitch && (changed || forceApply))
                 {
-                    ApplyFlow(EDataFlow.Render, "Output");
-                    ApplyFlow(EDataFlow.Capture, "Input");
+                    ApplyFlow(EDataFlow.Render, "output");
+                    ApplyFlow(EDataFlow.Capture, "input");
                 }
                 RefreshUi();
             }
-            catch (Exception ex) { Log("Xəta: " + ex.Message); }
+            catch (Exception ex) { Log(L.T("logError", ex.Message)); }
         }
 
         void ApplyFlow(EDataFlow flow, string label)
@@ -460,7 +512,7 @@ namespace AudioSwitcher
             if (audio.GetDefaultId(flow, ERole.Console) != target.Id || audio.GetDefaultId(flow, ERole.Communications) != target.Id)
             {
                 audio.SetDefault(target.Id);
-                Log(label + ": → " + target.Name);
+                Log(L.T("logSwitched", L.T(label), target.Name));
             }
         }
 
@@ -474,10 +526,10 @@ namespace AudioSwitcher
             var o = current.FirstOrDefault(x => x.Id == defOut);
             var i = current.FirstOrDefault(x => x.Id == defIn);
             string on = o != null ? o.Name : "—", inn = i != null ? i.Name : "—";
-            lblNow.Text = "Output:  " + on + "        Input:  " + inn;
+            lblNow.Text = L.T("output") + ":  " + on + "        " + L.T("input") + ":  " + inn;
             FitColumns(lvOut); FitColumns(lvIn); FitColumns(lvBt);
-            lblHx.Text = lastHx == -1 ? "" : "HyperX qulaqlıq: " + HxText(lastHx);
-            string tip = "Out: " + on + "\nIn: " + inn;
+            lblHx.Text = lastHx < 0 ? "" : L.T("hxLabel", HxText(lastHx));
+            string tip = L.T("output") + ": " + on + "\n" + L.T("input") + ": " + inn;
             tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
         }
 
@@ -496,14 +548,14 @@ namespace AudioSwitcher
                 string status;
                 Color color = SystemColors.GrayText;
                 bool isDef = avail != null && avail.Id == def;
-                if (avail != null) { status = isDef ? "● Aktiv" : "Qoşulu"; color = isDef ? ActiveColor : SystemColors.WindowText; }
-                else if (matches.Any(m => m.Active)) status = "Qulaqlıq sönülü";
-                else if (matches.Count > 0) status = "Qoşulu deyil";
-                else status = "Tapılmadı";
+                if (avail != null) { status = L.T(isDef ? "stActive" : "stConnected"); color = isDef ? ActiveColor : SystemColors.WindowText; }
+                else if (matches.Any(m => m.Active)) status = L.T("stHeadsetOff");
+                else if (matches.Count > 0) status = L.T("stDisconnected");
+                else status = L.T("stNotFound");
                 var it = new ListViewItem(new[] { (i + 1).ToString(), name, status });
                 it.ForeColor = color;
                 if (isDef) it.Font = boldFont;
-                it.ToolTipText = "Axtarış: \"" + p + "\"";
+                it.ToolTipText = L.T("matchTip", p);
                 lv.Items.Add(it);
             }
             lv.ShowItemToolTips = true;
@@ -543,14 +595,14 @@ namespace AudioSwitcher
             foreach (var g in groups)
             {
                 bool hasOut = g.Endpoints.Any(x => x.Flow == EDataFlow.Render), hasIn = g.Endpoints.Any(x => x.Flow == EDataFlow.Capture);
-                string kind = hasOut && hasIn ? "Səs + mikrofon" : hasOut ? "Səs" : hasIn ? "Mikrofon" : "Audio";
-                var it = new ListViewItem(new[] { g.Name, g.Connected ? "● Qoşulu" : "Qoşulu deyil", kind });
+                string kind = L.T(hasOut && hasIn ? "kindBoth" : hasOut ? "kindOut" : hasIn ? "kindIn" : "kindAudio");
+                var it = new ListViewItem(new[] { g.Name, L.T(g.Connected ? "stBtConnected" : "stDisconnected"), kind });
                 it.ForeColor = g.Connected ? ActiveColor : SystemColors.GrayText;
                 it.Tag = g;
                 lvBt.Items.Add(it);
                 if (g.Name == selName) it.Selected = true;
             }
-            if (groups.Count == 0) lvBt.Items.Add(new ListViewItem(new[] { "(Bluetooth audio cihazı yoxdur)", "", "" }) { ForeColor = SystemColors.GrayText });
+            if (groups.Count == 0) lvBt.Items.Add(new ListViewItem(new[] { L.T("noBt"), "", "" }) { ForeColor = SystemColors.GrayText });
             lvBt.EndUpdate();
         }
 
@@ -585,7 +637,7 @@ namespace AudioSwitcher
             var l = Pri(flow);
             int i = SelIndex(lv);
             if (i < 0) return;
-            Log("Siyahıdan silindi: " + l[i]);
+            Log(L.T("logRemoved", l[i]));
             l.RemoveAt(i);
             SaveConfig();
             Evaluate(true);
@@ -602,15 +654,15 @@ namespace AudioSwitcher
             foreach (var e in names)
             {
                 var ep = e;
-                var it = new ToolStripMenuItem(ep.Name + (ep.Active ? "" : "   (qoşulu deyil)"));
+                var it = new ToolStripMenuItem(ep.Name + (ep.Active ? "" : L.T("addNotConnected")));
                 it.Click += (s, a) =>
                 {
-                    l.Add(ep.Name); SaveConfig(); Log("Siyahıya əlavə edildi: " + ep.Name);
+                    l.Add(ep.Name); SaveConfig(); Log(L.T("logAdded", ep.Name));
                     Evaluate(true); SelectRow(lv, l.Count - 1);
                 };
                 m.Items.Add(it);
             }
-            if (m.Items.Count == 0) m.Items.Add(new ToolStripMenuItem("(bütün cihazlar artıq siyahıdadır)") { Enabled = false });
+            if (m.Items.Count == 0) m.Items.Add(new ToolStripMenuItem(L.T("addAllListed")) { Enabled = false });
             m.Show(anchor, new Point(0, anchor.Height));
         }
 
@@ -620,9 +672,9 @@ namespace AudioSwitcher
             if (i < 0) return;
             string p = Pri(flow)[i];
             var e = available.FirstOrDefault(x => x.Flow == flow && Matches(x, p));
-            if (e == null) { Log("Qoşulu deyil: " + p); return; }
+            if (e == null) { Log(L.T("logNotConnected", p)); return; }
             audio.SetDefault(e.Id);
-            Log("Əl ilə: " + e.Name);
+            Log(L.T("logManual", e.Name));
             dirty = true;
         }
 
@@ -630,8 +682,8 @@ namespace AudioSwitcher
         {
             var g = SelectedBt();
             if (g == null) return;
-            if (connect == g.Connected) { Log(g.Name + (connect ? " artıq qoşuludur" : " artıq ayrılıb")); return; }
-            Log((connect ? "Bluetooth qoşulur: " : "Bluetooth ayrılır: ") + g.Name);
+            if (connect == g.Connected) { Log(L.T(connect ? "logBtAlreadyOn" : "logBtAlreadyOff", g.Name)); return; }
+            Log(L.T(connect ? "logBtConnecting" : "logBtDisconnecting", g.Name));
             Cursor = Cursors.WaitCursor;
             bool ok = false;
             try
@@ -643,11 +695,11 @@ namespace AudioSwitcher
                 if (!ok)
                     foreach (var id in ids)
                         if (audio.BtCommand(id, connect) >= 0) ok = true;
-                if (connect && ids.Count == 0) Log(g.Name + ": Windows-da audio cihazı yoxdur, Windows Settings-dən qoşun");
+                if (connect && ids.Count == 0) Log(L.T("logBtNoEndpoint", g.Name));
             }
-            catch (Exception ex) { Log("Xəta: " + ex.Message); }
+            catch (Exception ex) { Log(L.T("logError", ex.Message)); }
             finally { Cursor = Cursors.Default; }
-            if (!ok) Log("Alınmadı — cihaz yaxında və açıq olmalıdır");
+            if (!ok) Log(L.T("logBtFailed"));
             dirty = true;
         }
 
@@ -660,7 +712,7 @@ namespace AudioSwitcher
                 lastSavedJson = cfg.ToJson();
                 File.WriteAllText(cfgPath, lastSavedJson, new UTF8Encoding(false));
             }
-            catch (Exception ex) { Log("config.json yazılmadı: " + ex.Message); }
+            catch (Exception ex) { Log(L.T("logCfgWriteErr", ex.Message)); }
         }
 
         void ReloadConfig()
@@ -671,11 +723,13 @@ namespace AudioSwitcher
             if (text == lastSavedJson) return;
             string err;
             var c = Config.Load(cfgPath, out err);
-            if (c == null) { Log("config.json xətalıdır, köhnə ayarlar saxlanıldı: " + err); return; }
+            if (c == null) { Log(L.T("logCfgInvalid", err)); return; }
             cfg = c;
             lastSavedJson = text;
-            suppressEvents = true; chkAuto.Checked = cfg.AutoSwitch; suppressEvents = false;
-            Log("config.json yenidən oxundu");
+            L.Lang = cfg.Language;
+            suppressEvents = true; chkAuto.Checked = cfg.AutoSwitch; cmbLang.SelectedIndex = L.Index; suppressEvents = false;
+            ApplyTexts();
+            Log(L.T("logCfgReloaded"));
             Evaluate(true);
         }
 
@@ -694,9 +748,9 @@ namespace AudioSwitcher
                     if (on) k.SetValue("AudioSwitcher", "\"" + Application.ExecutablePath + "\" --tray");
                     else k.DeleteValue("AudioSwitcher", false);
                 }
-                Log(on ? "Windows ilə başlama açıldı" : "Windows ilə başlama söndürüldü");
+                Log(L.T(on ? "logStartupOn" : "logStartupOff"));
             }
-            catch (Exception ex) { Log("Startup ayarı alınmadı: " + ex.Message); }
+            catch (Exception ex) { Log(L.T("logStartupErr", ex.Message)); }
         }
 
         void Log(string m)

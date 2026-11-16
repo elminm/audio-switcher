@@ -10,6 +10,7 @@ When a device is connected or disconnected, the app picks the highest-priority d
 - Switch now: double-click a device, or use the tray menu.
 - Bluetooth panel: lists paired audio devices with their real link state, and has **Connect** / **Disconnect** buttons.
 - **HyperX Cloud III Wireless** support. The USB dongle keeps the audio device "present" even when the headset is switched off. The app asks the dongle over HID whether the headset is actually linked, and skips it when it is off.
+- English, Azerbaijani and Russian UI. English is the default, and the language can be switched in the window or the tray menu.
 - Starts with Windows (optional) and runs from the tray.
 - Single small `.exe` with no dependencies beyond .NET Framework 4.x, which ships with Windows.
 
@@ -29,6 +30,7 @@ This produces `AudioSwitcher.exe` in the repository root. Run it once. It create
 
 ```json
 {
+  "language": "en",
   "pollSeconds": 3,
   "autoSwitch": true,
   "output": ["HyperX Cloud III", "JBL Clip 4", "Speakers (Realtek"],
