@@ -142,6 +142,25 @@ namespace AudioSwitcher
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 };
         readonly Dictionary<Control, string> infoTips = new Dictionary<Control, string>();
 
+        // breaks a tooltip into short lines (WinForms tooltips don't wrap on their own)
+        static string Wrap(string text, int width = 42)
+        {
+            var sb = new StringBuilder();
+            foreach (var para in text.Split('\n'))
+            {
+                if (sb.Length > 0) sb.Append('\n');
+                int line = 0;
+                foreach (var w in para.Split(' '))
+                {
+                    if (w.Length == 0) continue;
+                    if (line > 0 && line + 1 + w.Length > width) { sb.Append('\n'); line = 0; }
+                    else if (line > 0) { sb.Append(' '); line++; }
+                    sb.Append(w); line += w.Length;
+                }
+            }
+            return sb.ToString();
+        }
+
         // small "i" icon next to a control; hovering either shows the localized tip
         Label Info(Control owner, string tipKey)
         {
@@ -153,7 +172,7 @@ namespace AudioSwitcher
                 Margin = new Padding(S(1), S(4), S(18), S(2))
             };
             infoTips[owner] = tipKey; infoTips[l] = tipKey;
-            tips.SetToolTip(owner, L.T(tipKey)); tips.SetToolTip(l, L.T(tipKey));
+            tips.SetToolTip(owner, Wrap(L.T(tipKey))); tips.SetToolTip(l, Wrap(L.T(tipKey)));
             return l;
         }
         ComboBox cmbLang;
@@ -350,7 +369,7 @@ namespace AudioSwitcher
         void ApplyTexts()
         {
             foreach (var kv in localized) SetText(kv.Key, L.T(kv.Value));
-            foreach (var kv in infoTips) tips.SetToolTip(kv.Key, L.T(kv.Value));
+            foreach (var kv in infoTips) tips.SetToolTip(kv.Key, Wrap(L.T(kv.Value)));
             if (audio != null) RefreshUi();
         }
 

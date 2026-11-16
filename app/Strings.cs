@@ -30,9 +30,9 @@ namespace AudioSwitcher
         {
             { "autoSwitch",       new[] { "Auto switch (by priority)",              "Avtomatik keçid (prioritetə görə)",           "Автопереключение (по приоритету)" } },
             { "autoSwitchShort",  new[] { "Auto switch",                            "Avtomatik keçid",                             "Автопереключение" } },
-            { "autoSwitchTip",    new[] { "Automatically make the highest-priority connected device the default output and input. When off, the app never switches by itself.",
-                                              "Qoşulu cihazlardan prioriteti ən yüksək olanı avtomatik default output və input edir. Söndürüləndə app özü heç vaxt keçid etmir.",
-                                              "Автоматически делает подключённое устройство с наивысшим приоритетом устройством вывода и ввода по умолчанию. Если выключено, приложение само не переключает." } },
+            { "autoSwitchTip",    new[] { "Automatically make the highest-priority connected device the default output and input.\n\nWhen off, the app never switches by itself.",
+                                              "Qoşulu cihazlardan prioriteti ən yüksək olanı avtomatik default output və input edir.\n\nSöndürüləndə app özü heç vaxt keçid etmir.",
+                                              "Автоматически делает подключённое устройство с наивысшим приоритетом устройством вывода и ввода по умолчанию.\n\nЕсли выключено, приложение само не переключает." } },
             { "startWithWindowsTip", new[] { "Start the app in the tray when you sign in to Windows.",
                                               "Windows-a daxil olanda app avtomatik tray-də başlasın.",
                                               "Запускать приложение в трее при входе в Windows." } },
