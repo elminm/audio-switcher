@@ -55,6 +55,7 @@ namespace AudioSwitcher
     {
         public int PollSeconds = 3;
         public bool AutoSwitch = true;
+        public bool KeepManual = true;
         public string Language = "en";
         public List<string> Output = new List<string>();
         public List<string> Input = new List<string>();
@@ -71,6 +72,7 @@ namespace AudioSwitcher
                 object v;
                 if (d.TryGetValue("pollSeconds", out v)) c.PollSeconds = Math.Max(1, Convert.ToInt32(v));
                 if (d.TryGetValue("autoSwitch", out v)) c.AutoSwitch = Convert.ToBoolean(v);
+                if (d.TryGetValue("keepManual", out v)) c.KeepManual = Convert.ToBoolean(v);
                 if (d.TryGetValue("language", out v) && v != null) c.Language = v.ToString();
                 if (d.TryGetValue("output", out v)) c.Output = ToList(v);
                 if (d.TryGetValue("input", out v)) c.Input = ToList(v);
@@ -94,6 +96,7 @@ namespace AudioSwitcher
             sb.Append("{\r\n  \"language\": ").Append(js.Serialize(Language)).Append(",\r\n");
             sb.Append("  \"pollSeconds\": ").Append(PollSeconds).Append(",\r\n");
             sb.Append("  \"autoSwitch\": ").Append(AutoSwitch ? "true" : "false").Append(",\r\n");
+            sb.Append("  \"keepManual\": ").Append(KeepManual ? "true" : "false").Append(",\r\n");
             AppendList(sb, js, "output", Output); sb.Append(",\r\n");
             AppendList(sb, js, "input", Input); sb.Append("\r\n}\r\n");
             return sb.ToString();
@@ -134,7 +137,9 @@ namespace AudioSwitcher
         Icon appIcon;
         FileSystemWatcher watcher;
         ListView lvOut, lvIn, lvBt;
-        CheckBox chkAuto, chkStartup;
+        CheckBox chkAuto, chkStartup, chkKeep;
+        HashSet<string> prevAvail;
+        readonly ToolTip tips = new ToolTip { AutoPopDelay = 15000 };
         ComboBox cmbLang;
         Label lblHx, lblNow;
         readonly List<KeyValuePair<object, string>> localized = new List<KeyValuePair<object, string>>();
@@ -249,6 +254,14 @@ namespace AudioSwitcher
                 Log(L.T(cfg.AutoSwitch ? "logAutoOn" : "logAutoOff"));
                 if (cfg.AutoSwitch) Evaluate(true);
             };
+            chkKeep = Loc(new CheckBox { AutoSize = true, Checked = cfg.KeepManual, Margin = new Padding(0, S(2), S(20), S(2)) }, "keepManual");
+            chkKeep.CheckedChanged += (s, e) =>
+            {
+                if (suppressEvents) return;
+                cfg.KeepManual = chkKeep.Checked; SaveConfig();
+                Log(L.T(cfg.KeepManual ? "logKeepOn" : "logKeepOff"));
+            };
+            tips.SetToolTip(chkKeep, L.T("keepManualTip"));
             chkStartup = Loc(new CheckBox { AutoSize = true, Checked = GetStartup(), Margin = new Padding(0, S(2), S(20), S(2)) }, "startWithWindows");
             chkStartup.CheckedChanged += (s, e) => { SetStartup(chkStartup.Checked); };
             var lblLang = Loc(new Label { AutoSize = true, Margin = new Padding(0, S(5), S(4), S(2)) }, "language");
@@ -263,7 +276,7 @@ namespace AudioSwitcher
                 ApplyTexts();
             };
             lblHx = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(0, S(5), 0, S(2)) };
-            flags.Controls.Add(chkAuto); flags.Controls.Add(chkStartup); flags.Controls.Add(lblLang); flags.Controls.Add(cmbLang); flags.Controls.Add(lblHx);
+            flags.Controls.Add(chkAuto); flags.Controls.Add(chkKeep); flags.Controls.Add(chkStartup); flags.Controls.Add(lblLang); flags.Controls.Add(cmbLang); flags.Controls.Add(lblHx);
             lblNow = new Label { AutoSize = true, Font = boldFont, Margin = new Padding(S(2), S(6), 0, 0) };
             top.Controls.Add(flags, 0, 0);
             top.Controls.Add(lblNow, 0, 1);
@@ -319,6 +332,7 @@ namespace AudioSwitcher
         void ApplyTexts()
         {
             foreach (var kv in localized) SetText(kv.Key, L.T(kv.Value));
+            if (chkKeep != null) tips.SetToolTip(chkKeep, L.T("keepManualTip"));
             if (audio != null) RefreshUi();
         }
 
@@ -402,6 +416,9 @@ namespace AudioSwitcher
             var auto = new ToolStripMenuItem(L.T("autoSwitchShort")) { Checked = cfg.AutoSwitch };
             auto.Click += (s, e) => { chkAuto.Checked = !chkAuto.Checked; };
             m.Items.Add(auto);
+            var keep = new ToolStripMenuItem(L.T("keepManual")) { Checked = cfg.KeepManual };
+            keep.Click += (s, e) => { chkKeep.Checked = !chkKeep.Checked; };
+            m.Items.Add(keep);
             var lang = new ToolStripMenuItem(L.T("language").TrimEnd(':'));
             for (int i = 0; i < L.Names.Length; i++)
             {
@@ -510,23 +527,48 @@ namespace AudioSwitcher
                 bool changed = sig != lastSig;
                 if (changed && lastSig != null) Log(L.T("logDevicesChanged"));
                 lastSig = sig;
+                var prev = prevAvail;
+                prevAvail = new HashSet<string>(available.Select(x => x.Id));
                 if (cfg.AutoSwitch && (changed || forceApply))
                 {
-                    ApplyFlow(EDataFlow.Render, "output");
-                    ApplyFlow(EDataFlow.Capture, "input");
+                    // Smart mode: on a plain device change, keep the user's choice unless it is gone
+                    // or a newly appeared device outranks it. Forced re-applies always use full priority.
+                    HashSet<string> smartPrev = (cfg.KeepManual && !forceApply) ? prev : null;
+                    ApplyFlow(EDataFlow.Render, "output", smartPrev);
+                    ApplyFlow(EDataFlow.Capture, "input", smartPrev);
                 }
                 RefreshUi();
             }
             catch (Exception ex) { Log(L.T("logError", ex.Message)); }
         }
 
-        void ApplyFlow(EDataFlow flow, string label)
+        int Rank(AudioEndpoint e)
+        {
+            var l = Pri(e.Flow);
+            for (int i = 0; i < l.Count; i++) if (Matches(e, l[i])) return i;
+            return int.MaxValue;
+        }
+
+        void ApplyFlow(EDataFlow flow, string label, HashSet<string> prev)
         {
             AudioEndpoint target = null;
-            foreach (var p in Pri(flow))
+            string curId = SafeDefault(flow);
+            var cur = curId == null ? null : available.FirstOrDefault(x => x.Id == curId);
+            if (prev != null && cur != null)
             {
-                target = available.FirstOrDefault(x => x.Flow == flow && Matches(x, p));
-                if (target != null) break;
+                // current device still here: switch only to a new device with higher priority
+                int curRank = Rank(cur);
+                target = available.Where(x => x.Flow == flow && !prev.Contains(x.Id) && Rank(x) < curRank)
+                                  .OrderBy(x => Rank(x)).FirstOrDefault();
+                if (target == null) return;
+            }
+            else
+            {
+                foreach (var p in Pri(flow))
+                {
+                    target = available.FirstOrDefault(x => x.Flow == flow && Matches(x, p));
+                    if (target != null) break;
+                }
             }
             if (target == null) return;
             if (audio.GetDefaultId(flow, ERole.Console) != target.Id || audio.GetDefaultId(flow, ERole.Communications) != target.Id)
@@ -747,7 +789,7 @@ namespace AudioSwitcher
             cfg = c;
             lastSavedJson = text;
             L.Lang = cfg.Language;
-            suppressEvents = true; chkAuto.Checked = cfg.AutoSwitch; cmbLang.SelectedIndex = L.Index; suppressEvents = false;
+            suppressEvents = true; chkAuto.Checked = cfg.AutoSwitch; chkKeep.Checked = cfg.KeepManual; cmbLang.SelectedIndex = L.Index; suppressEvents = false;
             ApplyTexts();
             Log(L.T("logCfgReloaded"));
             Evaluate(true);

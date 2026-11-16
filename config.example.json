@@ -2,6 +2,7 @@
   "language": "en",
   "pollSeconds": 3,
   "autoSwitch": true,
+  "keepManual": true,
   "output": [
     "Headphones",
     "Speakers"

@@ -2,7 +2,14 @@
 
 A small Windows tray app that keeps your default **output** and **input** audio devices set according to a priority list.
 
-When a device is connected or disconnected, the app picks the highest-priority device that is available and makes it the default (console, multimedia and communications roles). If you switch devices by hand, the app leaves your choice alone until the set of connected devices changes again.
+When a device is connected or disconnected, the app picks the highest-priority device that is available and makes it the default (console, multimedia and communications roles).
+
+If you switch devices by hand, **Keep my manual choice** (on by default) decides what happens on the next device change:
+
+- **On:** your choice stays. The app switches only if the device you picked disappears, or a newly connected device has a higher priority than it.
+- **Off:** any device change re-applies the full priority list.
+
+Editing the priority list, turning Auto switch back on and starting the app always re-apply the full list.
 
 ## Features
 
@@ -53,6 +60,7 @@ If a `config.json` sits next to the exe, the app runs in portable mode and keeps
   "language": "en",
   "pollSeconds": 3,
   "autoSwitch": true,
+  "keepManual": true,
   "output": ["HyperX Cloud III", "JBL Clip 4", "Speakers (Realtek"],
   "input":  ["HyperX Cloud III", "Microphone Array"]
 }
