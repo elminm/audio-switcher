@@ -139,7 +139,23 @@ namespace AudioSwitcher
         ListView lvOut, lvIn, lvBt;
         CheckBox chkAuto, chkStartup, chkKeep;
         HashSet<string> prevAvail;
-        readonly ToolTip tips = new ToolTip { AutoPopDelay = 15000 };
+        readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 };
+        readonly Dictionary<Control, string> infoTips = new Dictionary<Control, string>();
+
+        // small "i" icon next to a control; hovering either shows the localized tip
+        Label Info(Control owner, string tipKey)
+        {
+            var l = new Label
+            {
+                Text = "ⓘ", AutoSize = true, Cursor = Cursors.Help,
+                ForeColor = SystemColors.HotTrack,
+                Font = new Font("Segoe UI Symbol", Font.SizeInPoints),
+                Margin = new Padding(S(1), S(4), S(18), S(2))
+            };
+            infoTips[owner] = tipKey; infoTips[l] = tipKey;
+            tips.SetToolTip(owner, L.T(tipKey)); tips.SetToolTip(l, L.T(tipKey));
+            return l;
+        }
         ComboBox cmbLang;
         Label lblHx, lblNow;
         readonly List<KeyValuePair<object, string>> localized = new List<KeyValuePair<object, string>>();
@@ -246,7 +262,7 @@ namespace AudioSwitcher
             // top bar
             var top = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, RowCount = 2, Margin = new Padding(0, 0, 0, S(6)) };
             var flags = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true, Margin = new Padding(0) };
-            chkAuto = Loc(new CheckBox { AutoSize = true, Checked = cfg.AutoSwitch, Margin = new Padding(0, S(2), S(20), S(2)) }, "autoSwitch");
+            chkAuto = Loc(new CheckBox { AutoSize = true, Checked = cfg.AutoSwitch, Margin = new Padding(0, S(2), 0, S(2)) }, "autoSwitch");
             chkAuto.CheckedChanged += (s, e) =>
             {
                 if (suppressEvents) return;
@@ -254,15 +270,14 @@ namespace AudioSwitcher
                 Log(L.T(cfg.AutoSwitch ? "logAutoOn" : "logAutoOff"));
                 if (cfg.AutoSwitch) Evaluate(true);
             };
-            chkKeep = Loc(new CheckBox { AutoSize = true, Checked = cfg.KeepManual, Margin = new Padding(0, S(2), S(20), S(2)) }, "keepManual");
+            chkKeep = Loc(new CheckBox { AutoSize = true, Checked = cfg.KeepManual, Margin = new Padding(0, S(2), 0, S(2)) }, "keepManual");
             chkKeep.CheckedChanged += (s, e) =>
             {
                 if (suppressEvents) return;
                 cfg.KeepManual = chkKeep.Checked; SaveConfig();
                 Log(L.T(cfg.KeepManual ? "logKeepOn" : "logKeepOff"));
             };
-            tips.SetToolTip(chkKeep, L.T("keepManualTip"));
-            chkStartup = Loc(new CheckBox { AutoSize = true, Checked = GetStartup(), Margin = new Padding(0, S(2), S(20), S(2)) }, "startWithWindows");
+            chkStartup = Loc(new CheckBox { AutoSize = true, Checked = GetStartup(), Margin = new Padding(0, S(2), 0, S(2)) }, "startWithWindows");
             chkStartup.CheckedChanged += (s, e) => { SetStartup(chkStartup.Checked); };
             var lblLang = Loc(new Label { AutoSize = true, Margin = new Padding(0, S(5), S(4), S(2)) }, "language");
             cmbLang = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = S(120), Margin = new Padding(0, 0, S(20), 0) };
@@ -276,7 +291,10 @@ namespace AudioSwitcher
                 ApplyTexts();
             };
             lblHx = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(0, S(5), 0, S(2)) };
-            flags.Controls.Add(chkAuto); flags.Controls.Add(chkKeep); flags.Controls.Add(chkStartup); flags.Controls.Add(lblLang); flags.Controls.Add(cmbLang); flags.Controls.Add(lblHx);
+            flags.Controls.Add(chkAuto); flags.Controls.Add(Info(chkAuto, "autoSwitchTip"));
+            flags.Controls.Add(chkKeep); flags.Controls.Add(Info(chkKeep, "keepManualTip"));
+            flags.Controls.Add(chkStartup); flags.Controls.Add(Info(chkStartup, "startWithWindowsTip"));
+            flags.Controls.Add(lblLang); flags.Controls.Add(cmbLang); flags.Controls.Add(lblHx);
             lblNow = new Label { AutoSize = true, Font = boldFont, Margin = new Padding(S(2), S(6), 0, 0) };
             top.Controls.Add(flags, 0, 0);
             top.Controls.Add(lblNow, 0, 1);
@@ -332,7 +350,7 @@ namespace AudioSwitcher
         void ApplyTexts()
         {
             foreach (var kv in localized) SetText(kv.Key, L.T(kv.Value));
-            if (chkKeep != null) tips.SetToolTip(chkKeep, L.T("keepManualTip"));
+            foreach (var kv in infoTips) tips.SetToolTip(kv.Key, L.T(kv.Value));
             if (audio != null) RefreshUi();
         }
 
