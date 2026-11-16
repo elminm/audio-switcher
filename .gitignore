@@ -1,0 +1,10 @@
+# build output
+*.exe
+app/icon.ico
+
+# personal / runtime
+config.json
+*.log
+
+# legacy PowerShell prototype
+audio-switcher.ps1

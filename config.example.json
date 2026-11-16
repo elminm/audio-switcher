@@ -1,0 +1,11 @@
+{
+  "pollSeconds": 3,
+  "autoSwitch": true,
+  "output": [
+    "Headphones",
+    "Speakers"
+  ],
+  "input": [
+    "Microphone"
+  ]
+}
