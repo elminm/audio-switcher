@@ -1,6 +1,6 @@
 ; Inno Setup script for Audio Switcher. Build with installer\build.ps1.
 #define AppName "Audio Switcher"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.0"
 #define AppExe "AudioSwitcher.exe"
 
 [Setup]

@@ -17,8 +17,8 @@ using Microsoft.Win32;
 [assembly: System.Reflection.AssemblyProduct("Audio Switcher")]
 [assembly: System.Reflection.AssemblyDescription("Switches default audio devices by priority")]
 [assembly: System.Reflection.AssemblyCopyright("elminm")]
-[assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.0.0")]
 
 namespace AudioSwitcher
 {
